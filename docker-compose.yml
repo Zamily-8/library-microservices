@@ -1,0 +1,171 @@
+services:
+
+  # ─────────────────────────────────────────
+  # BASES DE DONNÉES (une par service)
+  # ─────────────────────────────────────────
+
+  mongo-users:
+    image: mongo:7
+    container_name: mongo-users
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: users_db
+    volumes:
+      - mongo-users-data:/data/db
+    networks:
+      - library-network
+
+  mongo-books:
+    image: mongo:7
+    container_name: mongo-books
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: books_db
+    volumes:
+      - mongo-books-data:/data/db
+    networks:
+      - library-network
+
+  mongo-loans:
+    image: mongo:7
+    container_name: mongo-loans
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: loans_db
+    volumes:
+      - mongo-loans-data:/data/db
+    networks:
+      - library-network
+
+  # ─────────────────────────────────────────
+  # MESSAGE BROKER
+  # ─────────────────────────────────────────
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "15672:15672"   # Interface web de gestion RabbitMQ
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: password
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - library-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # MICROSERVICES
+  # ─────────────────────────────────────────
+
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    container_name: user-service
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      MONGO_URI: mongodb://mongo-users:27017/users_db
+      JWT_SECRET: supersecretjwtkey2024library
+      JWT_EXPIRES_IN: 7d
+    depends_on:
+      - mongo-users
+    networks:
+      - library-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  book-service:
+    build:
+      context: ./services/book-service
+      dockerfile: Dockerfile
+    container_name: book-service
+    restart: unless-stopped
+    environment:
+      PORT: 3002
+      MONGO_URI: mongodb://mongo-books:27017/books_db
+      JWT_SECRET: supersecretjwtkey2024library
+      JWT_EXPIRES_IN: 7d
+    depends_on:
+      - mongo-books
+    networks:
+      - library-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  loan-service:
+    build:
+      context: ./services/loan-service
+      dockerfile: Dockerfile
+    container_name: loan-service
+    restart: unless-stopped
+    environment:
+      PORT: 3003
+      MONGO_URI: mongodb://mongo-loans:27017/loans_db
+      JWT_SECRET: supersecretjwtkey2024library
+      JWT_EXPIRES_IN: 7d
+      RABBITMQ_URL: amqp://admin:password@rabbitmq:5672
+      USER_SERVICE_URL: http://user-service:3001
+      BOOK_SERVICE_URL: http://book-service:3002
+    depends_on:
+      - mongo-loans
+      - rabbitmq
+      - user-service
+      - book-service
+    networks:
+      - library-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # API GATEWAY
+  # ─────────────────────────────────────────
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-gateway
+    restart: unless-stopped
+    ports:
+      - "80:80"         # Le seul port exposé au monde extérieur
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - user-service
+      - book-service
+      - loan-service
+    networks:
+      - library-network
+
+# ─────────────────────────────────────────
+# VOLUMES (stockage persistant)
+# ─────────────────────────────────────────
+
+volumes:
+  mongo-users-data:
+  mongo-books-data:
+  mongo-loans-data:
+  rabbitmq-data:
+
+# ─────────────────────────────────────────
+# RÉSEAU INTERNE
+# ─────────────────────────────────────────
+
+networks:
+  library-network:
+    driver: bridge

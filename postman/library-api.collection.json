@@ -1,0 +1,290 @@
+{
+  "info": {
+    "name": "Library Microservices API",
+    "description": "Collection complète pour tester le système de gestion de bibliothèque",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "baseUrl", "value": "http://localhost", "type": "string"},
+    {"key": "token", "value": "", "type": "string"},
+    {"key": "bookId", "value": "", "type": "string"},
+    {"key": "loanId", "value": "", "type": "string"},
+    {"key": "testEmail", "value": "", "type": "string"},
+    {"key": "testUsername", "value": "", "type": "string"}
+  ],
+  "item": [
+    {
+      "name": "1 - Health Checks",
+      "item": [
+        {
+          "name": "Gateway Health",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Gateway OK', () => { pm.expect(pm.response.json().status).to.eql('OK'); });"
+          ]}}],
+          "request": {"method": "GET", "url": "{{baseUrl}}/health"}
+        },
+        {
+          "name": "User Service Health (JWT protected - 401 expected)",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Service reachable', () => {",
+            "  pm.expect(pm.response.code).to.be.oneOf([200, 401]);",
+            "});",
+            "pm.test('Has message', () => {",
+            "  pm.expect(pm.response.json()).to.have.property('message');",
+            "});"
+          ]}}],
+          "request": {"method": "GET", "url": "{{baseUrl}}/api/users/health"}
+        }
+      ]
+    },
+    {
+      "name": "2 - User Service",
+      "item": [
+        {
+          "name": "Register User",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const ts = Date.now();",
+                  "pm.collectionVariables.set('testEmail', `user${ts}@test.com`);",
+                  "pm.collectionVariables.set('testUsername', `user${ts}`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {"exec": [
+                "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                "pm.test('Has token', () => {",
+                "  const json = pm.response.json();",
+                "  pm.expect(json).to.have.property('token');",
+                "  pm.collectionVariables.set('token', json.token);",
+                "});",
+                "pm.test('Has user object', () => {",
+                "  const json = pm.response.json();",
+                "  pm.expect(json.user).to.have.property('id');",
+                "});"
+              ]}
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\": \"{{testUsername}}\", \"email\": \"{{testEmail}}\", \"password\": \"password123\"}"
+            },
+            "url": "{{baseUrl}}/api/users/register"
+          }
+        },
+        {
+          "name": "Login User",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Has token', () => {",
+            "  const json = pm.response.json();",
+            "  pm.expect(json).to.have.property('token');",
+            "  pm.collectionVariables.set('token', json.token);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{testEmail}}\", \"password\": \"password123\"}"
+            },
+            "url": "{{baseUrl}}/api/users/login"
+          }
+        },
+        {
+          "name": "Get Profile",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Has user without password', () => {",
+            "  const json = pm.response.json();",
+            "  pm.expect(json.user).to.have.property('username');",
+            "  pm.expect(json.user).to.not.have.property('password');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+            "url": "{{baseUrl}}/api/users/profile"
+          }
+        },
+        {
+          "name": "Register - Reject Duplicate Email",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 400', () => pm.response.to.have.status(400));",
+            "pm.test('Has error message', () => {",
+            "  pm.expect(pm.response.json()).to.have.property('message');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"username\": \"otheruser\", \"email\": \"{{testEmail}}\", \"password\": \"password123\"}"
+            },
+            "url": "{{baseUrl}}/api/users/register"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3 - Book Service",
+      "item": [
+        {
+          "name": "Create Book",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 201', () => pm.response.to.have.status(201));",
+            "pm.test('Book created', () => {",
+            "  const json = pm.response.json();",
+            "  pm.expect(json.book).to.have.property('_id');",
+            "  pm.expect(json.book.title).to.eql('1984');",
+            "  pm.expect(json.book.available).to.eql(true);",
+            "  pm.collectionVariables.set('bookId', json.book._id);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"title\": \"1984\", \"author\": \"George Orwell\", \"isbn\": \"978-0-452-{{testUsername}}\", \"description\": \"Roman dystopique\", \"totalCopies\": 3}"
+            },
+            "url": "{{baseUrl}}/api/books"
+          }
+        },
+        {
+          "name": "Get All Books",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Returns array', () => {",
+            "  const json = pm.response.json();",
+            "  pm.expect(json.books).to.be.an('array');",
+            "  pm.expect(json.total).to.be.above(0);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+            "url": "{{baseUrl}}/api/books"
+          }
+        },
+        {
+          "name": "Get Book by ID",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Correct book', () => {",
+            "  const json = pm.response.json();",
+            "  pm.expect(json.book._id).to.eql(pm.collectionVariables.get('bookId'));",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+            "url": "{{baseUrl}}/api/books/{{bookId}}"
+          }
+        },
+        {
+          "name": "Update Book",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Book updated', () => {",
+            "  const json = pm.response.json();",
+            "  pm.expect(json.book.description).to.eql('Description mise à jour via Newman');",
+            "});"
+          ]}}],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\"description\": \"Description mise à jour via Newman\"}"},
+            "url": "{{baseUrl}}/api/books/{{bookId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4 - Loan Service",
+      "item": [
+        {
+          "name": "Borrow Book",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 201', () => pm.response.to.have.status(201));",
+            "pm.test('Loan created', () => {",
+            "  const json = pm.response.json();",
+            "  pm.expect(json.loan.status).to.eql('active');",
+            "  pm.expect(json.loan.bookTitle).to.eql('1984');",
+            "  pm.collectionVariables.set('loanId', json.loan._id);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "body": {"mode": "raw", "raw": "{\"bookId\": \"{{bookId}}\"}"},
+            "url": "{{baseUrl}}/api/loans/borrow"
+          }
+        },
+        {
+          "name": "Get My Loans",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Has loans', () => {",
+            "  const json = pm.response.json();",
+            "  pm.expect(json.loans).to.be.an('array');",
+            "  pm.expect(json.total).to.be.above(0);",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+            "url": "{{baseUrl}}/api/loans/my"
+          }
+        },
+        {
+          "name": "Return Book",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Loan returned', () => {",
+            "  const json = pm.response.json();",
+            "  pm.expect(json.loan.status).to.eql('returned');",
+            "  pm.expect(json.loan.returnedAt).to.exist;",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Authorization", "value": "Bearer {{token}}"}],
+            "url": "{{baseUrl}}/api/loans/return/{{loanId}}"
+          }
+        },
+        {
+          "name": "Borrow - Reject Without Token",
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Status 401', () => pm.response.to.have.status(401));"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\"bookId\": \"{{bookId}}\"}"},
+            "url": "{{baseUrl}}/api/loans/borrow"
+          }
+        }
+      ]
+    }
+  ]
+}

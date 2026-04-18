@@ -1,0 +1,161 @@
+name: CI/CD Pipeline — Library Microservices
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+
+  # ─────────────────────────────────────────
+  # JOB 1 : Tests unitaires et d'intégration
+  # ─────────────────────────────────────────
+  test:
+    name: Tests Jest (${{ matrix.service }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        service: [user-service, book-service, loan-service]
+
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: services/${{ matrix.service }}
+        run: npm install
+
+      - name: Run tests
+        working-directory: services/${{ matrix.service }}
+        env:
+          NODE_ENV: test
+          MONGO_URI: mongodb://localhost:27017/test_${{ matrix.service }}
+          JWT_SECRET: test_secret_key_ci
+          RABBITMQ_URL: amqp://localhost:5672
+          USER_SERVICE_URL: http://localhost:3001
+          BOOK_SERVICE_URL: http://localhost:3002
+        run: npm test
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.service }}
+          path: services/${{ matrix.service }}/coverage/
+
+  # ─────────────────────────────────────────
+  # JOB 2 : Tests Newman (intégration E2E)
+  # ─────────────────────────────────────────
+  newman:
+    name: Newman API Tests
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Start all services
+        run: docker compose up --build -d
+
+      - name: Wait for services to be healthy
+        run: |
+          echo "Waiting for services..."
+          sleep 30
+          docker compose ps
+
+      - name: Check services health
+        run: |
+          curl -f http://localhost/health || exit 1
+          echo "Gateway is healthy"
+
+      - name: Run Newman tests
+        run: |
+          docker run --rm \
+            --network library-microservices_library-network \
+            -v ${{ github.workspace }}/postman:/etc/newman \
+            postman/newman:alpine \
+            run /etc/newman/library-api.collection.json \
+            --env-var "baseUrl=http://nginx-gateway:80" \
+            --reporters cli,junit \
+            --reporter-junit-export /etc/newman/newman-results.xml
+
+      - name: Upload Newman results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-results
+          path: postman/newman-results.xml
+
+      - name: Stop services
+        if: always()
+        run: docker compose down
+
+  # ─────────────────────────────────────────
+  # JOB 3 : Build et push des images Docker
+  # ─────────────────────────────────────────
+  build-and-push:
+    name: Build & Push (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: [test, newman]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    strategy:
+      matrix:
+        service: [user-service, book-service, loan-service]
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/library-${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/${{ matrix.service }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Image pushed successfully
+        run: |
+          echo "✅ Image pushed: ghcr.io/${{ github.repository_owner }}/library-${{ matrix.service }}:latest"

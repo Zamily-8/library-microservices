@@ -7,6 +7,7 @@ COPY package*.json ./
 RUN npm install --production
 
 COPY src/ ./src/
+COPY tests/ ./tests/
 
 EXPOSE 3002
 

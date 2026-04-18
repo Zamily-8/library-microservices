@@ -9,26 +9,24 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middlewares globaux
 app.use(cors());
 app.use(express.json());
 
-// Route de santé (health check) — utilisée par Docker
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', service: 'user-service' });
 });
 
-// Routes principales
 app.use('/api/users', userRoutes);
 
-// Connexion à MongoDB puis démarrage du serveur
 const startServer = async () => {
   try {
     await mongoose.connect(process.env.MONGO_URI);
     console.log('✅ Connecté à MongoDB');
-    
-    const server = app.listen(PORT, () => {
-      console.log(`🚀 User Service démarré sur le port ${PORT}`);
+
+    const listenPort = process.env.NODE_ENV === 'test' ? 0 : PORT;
+
+    const server = app.listen(listenPort, () => {
+      console.log(`🚀 User Service démarré sur le port ${listenPort}`);
     });
 
     return server;
@@ -38,8 +36,6 @@ const startServer = async () => {
   }
 };
 
-// On démarre seulement si ce fichier est exécuté directement
-// (pas lors des tests Jest)
 if (require.main === module) {
   startServer();
 }

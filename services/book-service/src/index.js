@@ -23,8 +23,10 @@ const startServer = async () => {
     await mongoose.connect(process.env.MONGO_URI);
     console.log('✅ Connecté à MongoDB');
 
-    const server = app.listen(PORT, () => {
-      console.log(`🚀 Book Service démarré sur le port ${PORT}`);
+    const listenPort = process.env.NODE_ENV === 'test' ? 0 : PORT;
+
+    const server = app.listen(listenPort, () => {
+      console.log(`🚀 Book Service démarré sur le port ${listenPort}`);
     });
 
     return server;

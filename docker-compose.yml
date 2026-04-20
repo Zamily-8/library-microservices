@@ -121,10 +121,14 @@ services:
       USER_SERVICE_URL: http://user-service:3001
       BOOK_SERVICE_URL: http://book-service:3002
     depends_on:
-      - mongo-loans
-      - rabbitmq
-      - user-service
-      - book-service
+      mongo-loans:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      book-service:
+        condition: service_healthy
     networks:
       - library-network
     healthcheck:

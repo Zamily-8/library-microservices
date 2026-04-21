@@ -416,11 +416,17 @@ docker compose ps user-service
 ### Sauvegarde des données
 
 ```bash
-# Sauvegarder la base users
-docker exec mongo-users mongodump --db users_db --out /backup
+# Sauvegarder users
+docker exec mongo-users mongodump --db users_db --out /tmp/backup
+docker cp mongo-users:/tmp/backup ./backup/users
 
-# Restaurer
-docker exec mongo-users mongorestore /backup
+# Sauvegarder books
+docker exec mongo-books mongodump --db books_db --out /tmp/backup
+docker cp mongo-books:/tmp/backup ./backup/books
+
+# Sauvegarder loans
+docker exec mongo-loans mongodump --db loans_db --out /tmp/backup
+docker cp mongo-loans:/tmp/backup ./backup/loans
 ```
 
 ---
@@ -434,7 +440,14 @@ Chaque service est **indépendant** : on peut le déployer, le scaler ou le modi
 Respecter le principe **"Database per Service"** : chaque service est propriétaire de ses données. Loan Service ne peut pas modifier directement la base de Users — il doit passer par l'API.
 
 ### Pourquoi RabbitMQ ?
-Pour la **communication asynchrone** : quand un livre est emprunté, Loan Service publie un événement sans attendre de réponse. D'autres services (notification, analytics) peuvent écouter cet événement indépendamment.
+Pour la **communication asynchrone** : quand un livre est emprunté, 
+Loan Service publie un événement `BOOK_BORROWED` dans la queue 
+`loan_events` sans attendre de réponse. Le système est conçu pour 
+que d'autres services puissent écouter ces événements 
+indépendamment. RabbitMQ nécessite une configuration spéciale au 
+démarrage : le Loan Service attend que RabbitMQ soit en état 
+`healthy` avant de tenter la connexion, avec un mécanisme de 
+retry automatique (jusqu'à 10 tentatives).
 
 ### Pourquoi Nginx comme API Gateway ?
 Point d'entrée **unique** pour tous les clients. Il route les requêtes vers le bon service selon l'URL, masque la complexité interne et peut gérer le load balancing.
